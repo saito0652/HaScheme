@@ -1,10 +1,14 @@
 {-# LANGUAGE InstanceSigs, LambdaCase #-}
+{-# OPTIONS_GHC -Wno-missing-fields #-}
+{-# OPTIONS_GHC -Wno-missing-methods #-}
 
 module HaScheme where
 
 import Control.Applicative
 import Control.Monad
 import Data.Char
+import Language.Haskell.TH
+import Language.Haskell.TH.Quote
 
 newtype Parser a = P (String -> [(a,String)])
 
@@ -78,14 +82,15 @@ string (x:xs) = char x >> string xs >> return (x:xs)
 ident :: Parser String
 ident = liftA2 (:) lower $ many alphanum
 
-nat :: Parser Int
-nat = read <$> some digit
+nat :: Parser Exp
+nat = LitE . IntegerL . read <$> some digit
 
 space :: Parser ()
 space = void . many $ sat isSpace
 
-int :: Parser Int
-int = char '-' >> negate <$> nat <|> nat
+int :: Parser Exp
+int = do char '-' >> negate <$> nat
+    <|> nat
 
 token :: Parser a -> Parser a
 token p = space >> p >>= \x -> space >> return x
@@ -93,10 +98,10 @@ token p = space >> p >>= \x -> space >> return x
 identifier :: Parser String
 identifier = token ident
 
-natural :: Parser Int
+natural :: Parser Exp
 natural = token nat
 
-integer :: Parser Int
+integer :: Parser Exp
 integer = token int
 
 symbol :: String -> Parser String
@@ -108,18 +113,30 @@ quote p = symbol "'(" >> p >>= \x -> symbol ")" >> return x
 parens :: Parser a -> Parser a
 parens p = symbol "(" >> p >>= \x -> symbol ")" >> return x
 
-nats :: Parser [Int]
+nats :: Parser [Exp]
 nats = quote $ liftA2 (:) natural $ many natural
 
-expr :: Parser Int
-expr = parens $
-        do symbol "+" >> liftA2 (+) expOrNat expOrNat
-    <|> do symbol "-" >> liftA2 (-) expOrNat expOrNat
-    <|> do symbol "*" >> liftA2 (*) expOrNat expOrNat
-    where expOrNat = expr <|> natural
+instance Num Exp where
+    (+),(-),(*) :: Exp -> Exp -> Exp
+    x + y = ParensE $ UInfixE x (VarE $ mkName "+") y
+    x - y = ParensE $ UInfixE x (VarE $ mkName "-") y
+    x * y = ParensE $ UInfixE x (VarE $ mkName "*") y
+    negate :: Exp -> Exp
+    negate = AppE (VarE $ mkName "negate")
 
-eval :: String -> Int
+expr :: Parser Exp
+expr = do parens $
+            do symbol "+" >> liftA2 (+) expOrInt expOrInt
+        <|> do symbol "-" >> liftA2 (-) expOrInt expOrInt
+        <|> do symbol "*" >> liftA2 (*) expOrInt expOrInt
+    <|> integer
+    where expOrInt = expr <|> integer
+
+eval :: String -> Exp
 eval xs = case parse expr xs of
     [(n,[])] -> n
     [(_,o)]  -> error $ "Unused input " ++ o
     []       -> error "Invalid input"
+
+scheme :: QuasiQuoter
+scheme = QuasiQuoter { quoteExp = return . eval }
