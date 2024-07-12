@@ -76,7 +76,7 @@ string []     = return []
 string (x:xs) = char x >> string xs >> return (x:xs)
 
 ident :: Parser String
-ident = return (:) <*> lower <*> many alphanum
+ident = liftA2 (:) lower $ many alphanum
 
 nat :: Parser Int
 nat = read <$> some digit
@@ -109,13 +109,14 @@ parens :: Parser a -> Parser a
 parens p = symbol "(" >> p >>= \x -> symbol ")" >> return x
 
 nats :: Parser [Int]
-nats = quote $ return (:) <*> natural <*> many natural
+nats = quote $ liftA2 (:) natural $ many natural
 
 expr :: Parser Int
-expr = parens $ do symbol "+" >> return (+) <*> expr' <*> expr'
-            <|> do symbol "-" >> return (-) <*> expr' <*> expr'
-            <|> do symbol "*" >> return (*) <*> expr' <*> expr'
-    where expr' = expr <|> natural
+expr = parens $
+        do symbol "+" >> liftA2 (+) expOrNat expOrNat
+    <|> do symbol "-" >> liftA2 (-) expOrNat expOrNat
+    <|> do symbol "*" >> liftA2 (*) expOrNat expOrNat
+    where expOrNat = expr <|> natural
 
 eval :: String -> Int
 eval xs = case parse expr xs of
